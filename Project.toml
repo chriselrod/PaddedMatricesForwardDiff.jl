@@ -1,0 +1,13 @@
+name = "PaddedMatricesForwardDiff"
+uuid = "782720ac-e6d8-447e-9c3a-4f5f740bc8d0"
+authors = ["Chris Elrod"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
