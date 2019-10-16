@@ -1,16 +1,19 @@
 module PaddedMatricesForwardDiff
 
 using PaddedMatrices, ForwardDiff
+using PaddedMatrices: AbstractFixedSizeArray, AbstractMutableFixedSizeArray, AbstractConstantFixedSizeArray
+
+export value_gradient
 
 abstract type AbstractDualWrappedArray{S,T,N,X,L,D,G} <: AbstractFixedSizeArray{S,ForwardDiff.Dual{G,T,D},N,X,L} end
 
-struct DualWrappedArray{S,T,N,X,L,D,G,A<:PaddedMatrices.AbstractFixedSizeArray{S,T,N,X,L}} <: AbstractDualWrappedArray{S,T,N,X,L,D,G}
+struct DualWrappedArray{S,T,N,X,L,D,G,A<:AbstractFixedSizeArray{S,T,N,X,L}} <: AbstractDualWrappedArray{S,T,N,X,L,D,G}
     data::A
 end
 struct PtrDualWrappedArray{S,T,N,X,L,D,G} <: AbstractDualWrappedArray{S,T,N,X,L,D,G}
     data::PtrArray{S,T,N,X,L,false}
 end
-struct ConstDualWrappedArray{S,T,N,X,L,D,G,A<:PaddedMatrices.AbstractFixedSizeArray{S,T,N,X,L}} <: AbstractDualWrappedArray{S,T,N,X,L,D,G}
+struct ConstDualWrappedArray{S,T,N,X,L,D,G} <: AbstractDualWrappedArray{S,T,N,X,L,D,G}
     data::ConstantFixedSizeArray{S,T,N,X,L}
 end
 
@@ -21,27 +24,57 @@ function DualWrappedArray(A::AbstractFixedSizeArray{S,T,N,X,L},::Val{G}) where {
     DualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),G}(A)
 end
 function PtrDualWrappedArray(A::AbstractMutableFixedSizeArray{S,T,N,X,L}) where {S,T,N,X,L}
-    PtrDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),nothing}(pointer(A))
+    PtrDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),nothing}(PtrArray(A))
 end
 function PtrDualWrappedArray(A::AbstractMutableFixedSizeArray{S,T,N,X,L},::Val{G}) where {S,T,N,X,L,G}
-    PtrDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),G}(pointer(A))
+    PtrDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),G}(PtrArray(A))
 end
-function ConstantnDualWrappedArray(A::AbstractFixedSizeArray{S,T,N,X,L}) where {S,T,N,X,L}
-    ConstantDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),nothing}(A)
+function PtrDualWrappedArray(A::PtrArray{S,T,N,X,L}) where {S,T,N,X,L}
+    PtrDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),nothing}(A)
+end
+function PtrDualWrappedArray(A::PtrArray{S,T,N,X,L},::Val{G}) where {S,T,N,X,L,G}
+    PtrDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),G}(A)
+end
+function ConstantDualWrappedArray(A::AbstractFixedSizeArray{S,T,N,X,L}) where {S,T,N,X,L}
+    ConstDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),nothing}(A)
 end
 function ConstantDualWrappedArray(A::AbstractFixedSizeArray{S,T,N,X,L},::Val{G}) where {S,T,N,X,L,G}
-    ConstantDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),G}(A)
+    ConstDualWrappedArray{S,T,N,X,L,PaddedMatrices.type_length(A),G}(A)
 end
 
 
 @inline function Base.getindex(A::AbstractDualWrappedArray{S,T,N,X,L,D,G}, I...) where {S,T,N,X,L,D,G}
     ind = PaddedMatrices.sub2ind(A, I...) + 1
-    ForwardDiff.Dual{G,T,D}(
-        a.data[ind], ForwardDiff.Partials(Base.setindex(ntuple(_ -> zero(T), Val(D)), one(T), ind))
+    @boundscheck ind > L && throw(BoundsError())
+    @inbounds ForwardDiff.Dual{G,T,D}(
+        A.data[ind], ForwardDiff.Partials(ntuple(d -> d == ind ? one(T) : zero(T), Val(D)))
+        # A.data[ind], ForwardDiff.Partials(Base.setindex(ntuple(_ -> zero(T), Val(D)), one(T), ind))
     )
 end
+# @generated function Base.getindex(A::AbstractDualWrappedArray{S,T,N,X,L,D,G}, I...) where {S,T,N,X,L,D,G}
+    # quote
+        # $(Expr(:meta,:inline))
+        # ind = PaddedMatrices.sub2ind(A, I...) + 1
+        # @boundscheck ind > $L && throw(BoundsError())
+        # @inbounds ForwardDiff.Dual{G,T,D}(
+        # A.data[ind], ForwardDiff.Partials(Base.setindex($(Expr(:tuple,[zero(T) for d in 1:D]...)), one(T), ind))
+        # )
+    # end
+# end
 
-
+function ForwardDiff.gradient(f, A::AbstractMutableFixedSizeArray{S,T}) where {S,T}
+    GC.@preserve A begin
+        dA = PtrDualWrappedArray(A)
+        d = f(dA)
+        g = ConstantFixedSizeVector{PaddedMatrices.type_length(A),T,PaddedMatrices.type_length(A)}(d.partials.values)
+    end
+    g
+end
+function ForwardDiff.gradient(f, A::AbstractConstantFixedSizeArray{S,T}) where {S,T}
+    dA = ConstantDualWrappedArray(A)
+    d = f(dA)
+    ConstantFixedSizeVector{PaddedMatrices.type_length(A),T,PaddedMatrices.type_length(A)}(d.partials.values)
+end
 
 
 end # module
