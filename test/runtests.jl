@@ -72,4 +72,32 @@ gsx = ForwardDiff.gradient(baz, sx);
 # Static array is much faster!?!
 # Need to fix.
 
+function bop(x::AbstractVector{T}) where {T}
+    s = zero(T)
+    @inbounds for i ∈ eachindex(x)
+        xᵢ = x[i]
+        @simd for j ∈ eachindex(x)
+            s += x[j] * cS[j,i] * xᵢ
+        end
+    end
+    -0.5 * s
+end
+
+@time bop(x)
+@time bop(sx)
+
+@time gx = ForwardDiff.gradient(bop, x);
+@time gsx = ForwardDiff.gradient(bop, sx);
+@test all(
+ i -> gx[i] ≈ gsx[i], eachindex(gx)
+)
+
+@benchmark ForwardDiff.gradient(bop, $x) 
+@benchmark ForwardDiff.gradient(bop, $sx)
+
+@benchmark bop($x)
+@benchmark bop($sx)
+
+
+
 
