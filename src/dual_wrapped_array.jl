@@ -83,6 +83,6 @@ function value_gradient(sp::StackPointer, f, A::AbstractConstantFixedSizeArray{S
     sp, d = f(sp, dA)
     sp, (d.value, ConstantFixedSizeVector{PaddedMatrices.type_length(A),T,PaddedMatrices.type_length(A)}(d.partials.values))
 end
-ForwardDiff.gradient(sp::StackPointer, f, A::AbstractFixedSizeArray) = (sp, vg = value_gradient(f, A); (sp, last(vg)))
+ForwardDiff.gradient(sp::StackPointer, f, A::AbstractFixedSizeArray) = ((sp, vg) = value_gradient(f, A); (sp, last(vg)))
 
 
